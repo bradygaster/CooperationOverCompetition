@@ -159,6 +159,75 @@ describe('Task API', () => {
     });
   });
 
+  describe('GET /tasks (filtering)', () => {
+    before(async () => {
+      // Seed tasks with different statuses for filtering
+      const todo1 = await request(app).post('/tasks').send({ title: 'Buy milk' }).expect(201);
+      const todo2 = await request(app).post('/tasks').send({ title: 'Buy eggs' }).expect(201);
+      const ip1 = await request(app).post('/tasks').send({ title: 'Design logo' }).expect(201);
+      await request(app).patch(`/tasks/${ip1.body.id}`).send({ status: 'in-progress' }).expect(200);
+      const ip2 = await request(app).post('/tasks').send({ title: 'Design banner' }).expect(201);
+      await request(app).patch(`/tasks/${ip2.body.id}`).send({ status: 'in-progress' }).expect(200);
+      const done1 = await request(app).post('/tasks').send({ title: 'Write tests' }).expect(201);
+      await request(app).patch(`/tasks/${done1.body.id}`).send({ status: 'in-progress' }).expect(200);
+      await request(app).patch(`/tasks/${done1.body.id}`).send({ status: 'done' }).expect(200);
+    });
+
+    it('GET /tasks?status=todo returns only todo tasks', async () => {
+      const res = await request(app).get('/tasks?status=todo').expect(200);
+      assert.ok(Array.isArray(res.body));
+      assert.ok(res.body.length >= 2);
+      res.body.forEach(t => assert.equal(t.status, 'todo'));
+    });
+
+    it('GET /tasks?search=buy returns tasks with "buy" in title (case-insensitive)', async () => {
+      const res = await request(app).get('/tasks?search=buy').expect(200);
+      assert.ok(Array.isArray(res.body));
+      assert.ok(res.body.length >= 2);
+      res.body.forEach(t => assert.ok(t.title.toLowerCase().includes('buy')));
+    });
+
+    it('GET /tasks?status=in-progress&search=design returns matching in-progress tasks', async () => {
+      const res = await request(app).get('/tasks?status=in-progress&search=design').expect(200);
+      assert.ok(Array.isArray(res.body));
+      assert.ok(res.body.length >= 1);
+      res.body.forEach(t => {
+        assert.equal(t.status, 'in-progress');
+        assert.ok(t.title.toLowerCase().includes('design'));
+      });
+    });
+
+    it('GET /tasks?status=invalid returns 400', async () => {
+      const res = await request(app).get('/tasks?status=invalid').expect(400);
+      assert.ok(res.body.error);
+    });
+
+    it('GET /tasks?search= returns all tasks (empty search is no-op)', async () => {
+      const allRes = await request(app).get('/tasks').expect(200);
+      const emptySearchRes = await request(app).get('/tasks?search=').expect(200);
+      assert.equal(emptySearchRes.body.length, allRes.body.length);
+    });
+
+    it('GET /tasks with no params still returns all tasks (no regression)', async () => {
+      const res = await request(app).get('/tasks').expect(200);
+      assert.ok(Array.isArray(res.body));
+      assert.ok(res.body.length >= 5);
+    });
+
+    it('responds within 100ms for 100+ tasks', async () => {
+      // Seed 100 additional tasks
+      const Task = require('../src/models/task');
+      for (let i = 0; i < 100; i++) {
+        Task.create({ title: `Perf task ${i}` });
+      }
+
+      const start = Date.now();
+      await request(app).get('/tasks?status=todo').expect(200);
+      const elapsed = Date.now() - start;
+      assert.ok(elapsed < 100, `Expected < 100ms, got ${elapsed}ms`);
+    });
+  });
+
   describe('DELETE /tasks/:id', () => {
     it('removes a task and returns it', async () => {
       const created = await request(app)

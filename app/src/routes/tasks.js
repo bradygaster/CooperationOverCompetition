@@ -3,8 +3,23 @@ const Task = require('../models/task');
 
 const router = Router();
 
-// GET /tasks — list all tasks
+// GET /tasks — list all tasks (with optional filtering)
 router.get('/', (req, res) => {
+  const { status, search } = req.query;
+
+  // Validate status if provided
+  if (status !== undefined && !['todo', 'in-progress', 'done'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status. Must be one of: todo, in-progress, done' });
+  }
+
+  // Treat empty search as no-op
+  const effectiveSearch = search && search.trim() ? search.trim() : undefined;
+
+  if (status || effectiveSearch) {
+    const tasks = Task.getFiltered({ status, search: effectiveSearch });
+    return res.json(tasks);
+  }
+
   const tasks = Task.getAll();
   res.json(tasks);
 });

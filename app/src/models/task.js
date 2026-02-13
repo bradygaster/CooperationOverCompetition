@@ -61,4 +61,28 @@ function remove(id) {
   return existing;
 }
 
-module.exports = { getAll, getById, create, update, remove, VALID_TRANSITIONS };
+function getFiltered({ status, search } = {}) {
+  const db = getConnection();
+  let sql = 'SELECT * FROM tasks';
+  const conditions = [];
+  const params = [];
+
+  if (status) {
+    conditions.push('status = ?');
+    params.push(status);
+  }
+
+  if (search) {
+    conditions.push('title LIKE ?');
+    params.push(`%${search}%`);
+  }
+
+  if (conditions.length > 0) {
+    sql += ' WHERE ' + conditions.join(' AND ');
+  }
+
+  sql += ' ORDER BY created_at DESC';
+  return db.prepare(sql).all(...params);
+}
+
+module.exports = { getAll, getById, getFiltered, create, update, remove, VALID_TRANSITIONS };

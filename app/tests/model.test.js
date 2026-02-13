@@ -148,4 +148,48 @@ describe('Task model', () => {
       assert.equal(result, null);
     });
   });
+
+  describe('getFiltered', () => {
+    before(() => {
+      // Create tasks with various statuses for filtering tests
+      const t1 = Task.create({ title: 'Design homepage', description: 'UI work' });
+      Task.update(t1.id, { status: 'in-progress' });
+      Task.create({ title: 'Buy groceries', description: 'Food shopping' });
+      const t3 = Task.create({ title: 'Design API schema', description: 'Backend work' });
+      Task.update(t3.id, { status: 'in-progress' });
+      Task.create({ title: 'Write README', description: 'Docs' });
+    });
+
+    it('filters by status', () => {
+      const results = Task.getFiltered({ status: 'in-progress' });
+      assert.ok(results.length >= 2);
+      results.forEach(t => assert.equal(t.status, 'in-progress'));
+    });
+
+    it('filters by search term (case-insensitive)', () => {
+      const results = Task.getFiltered({ search: 'buy' });
+      assert.ok(results.length >= 1);
+      results.forEach(t => assert.ok(t.title.toLowerCase().includes('buy')));
+    });
+
+    it('filters by both status and search', () => {
+      const results = Task.getFiltered({ status: 'in-progress', search: 'design' });
+      assert.ok(results.length >= 1);
+      results.forEach(t => {
+        assert.equal(t.status, 'in-progress');
+        assert.ok(t.title.toLowerCase().includes('design'));
+      });
+    });
+
+    it('returns all tasks when no filters provided', () => {
+      const all = Task.getAll();
+      const filtered = Task.getFiltered({});
+      assert.equal(filtered.length, all.length);
+    });
+
+    it('returns empty array when no tasks match', () => {
+      const results = Task.getFiltered({ search: 'zzz_nonexistent_zzz' });
+      assert.equal(results.length, 0);
+    });
+  });
 });
