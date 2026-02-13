@@ -32,6 +32,33 @@ describe('Task API', () => {
       assert.ok(res.body.created_at);
     });
 
+    it('creates a task with priority', async () => {
+      const res = await request(app)
+        .post('/tasks')
+        .send({ title: 'High priority task', priority: 'high' })
+        .expect(201);
+
+      assert.equal(res.body.priority, 'high');
+    });
+
+    it('defaults priority to medium when not provided', async () => {
+      const res = await request(app)
+        .post('/tasks')
+        .send({ title: 'Default priority task' })
+        .expect(201);
+
+      assert.equal(res.body.priority, 'medium');
+    });
+
+    it('returns 400 for invalid priority', async () => {
+      const res = await request(app)
+        .post('/tasks')
+        .send({ title: 'Bad priority', priority: 'urgent' })
+        .expect(400);
+
+      assert.ok(res.body.error);
+    });
+
     it('returns 400 when title is missing', async () => {
       const res = await request(app)
         .post('/tasks')
@@ -157,6 +184,37 @@ describe('Task API', () => {
 
       assert.ok(res.body.error);
     });
+
+    it('updates priority without affecting other fields', async () => {
+      const created = await request(app)
+        .post('/tasks')
+        .send({ title: 'Priority patch', description: 'keep', priority: 'low' })
+        .expect(201);
+
+      const res = await request(app)
+        .patch(`/tasks/${created.body.id}`)
+        .send({ priority: 'high' })
+        .expect(200);
+
+      assert.equal(res.body.priority, 'high');
+      assert.equal(res.body.title, 'Priority patch');
+      assert.equal(res.body.description, 'keep');
+      assert.equal(res.body.status, 'todo');
+    });
+
+    it('returns 400 for invalid priority on PATCH', async () => {
+      const created = await request(app)
+        .post('/tasks')
+        .send({ title: 'Bad patch priority' })
+        .expect(201);
+
+      const res = await request(app)
+        .patch(`/tasks/${created.body.id}`)
+        .send({ priority: 'critical' })
+        .expect(400);
+
+      assert.ok(res.body.error);
+    });
   });
 
   describe('GET /tasks (filtering)', () => {
@@ -212,6 +270,56 @@ describe('Task API', () => {
       const res = await request(app).get('/tasks').expect(200);
       assert.ok(Array.isArray(res.body));
       assert.ok(res.body.length >= 5);
+    });
+  });
+
+  describe('GET /tasks (priority sorting)', () => {
+    before(async () => {
+      // Create tasks with different priorities
+      await request(app).post('/tasks').send({ title: 'Sort Low', priority: 'low' }).expect(201);
+      await request(app).post('/tasks').send({ title: 'Sort High', priority: 'high' }).expect(201);
+      await request(app).post('/tasks').send({ title: 'Sort Medium', priority: 'medium' }).expect(201);
+    });
+
+    it('GET /tasks?sort=priority returns high → medium → low', async () => {
+      const res = await request(app).get('/tasks?sort=priority').expect(200);
+      const priorities = res.body.map(t => t.priority);
+      const firstHigh = priorities.indexOf('high');
+      const firstMed = priorities.indexOf('medium');
+      const firstLow = priorities.indexOf('low');
+      assert.ok(firstHigh < firstMed, 'high should come before medium');
+      assert.ok(firstMed < firstLow, 'medium should come before low');
+    });
+
+    it('GET /tasks?sort=priority&order=desc returns low → medium → high', async () => {
+      const res = await request(app).get('/tasks?sort=priority&order=desc').expect(200);
+      const priorities = res.body.map(t => t.priority);
+      const firstLow = priorities.indexOf('low');
+      const firstMed = priorities.indexOf('medium');
+      const firstHigh = priorities.indexOf('high');
+      assert.ok(firstLow < firstMed, 'low should come before medium');
+      assert.ok(firstMed < firstHigh, 'medium should come before high');
+    });
+
+    it('priority sorting works with status filter', async () => {
+      const low = await request(app).post('/tasks').send({ title: 'IP Low', priority: 'low' }).expect(201);
+      await request(app).patch(`/tasks/${low.body.id}`).send({ status: 'in-progress' }).expect(200);
+      const high = await request(app).post('/tasks').send({ title: 'IP High', priority: 'high' }).expect(201);
+      await request(app).patch(`/tasks/${high.body.id}`).send({ status: 'in-progress' }).expect(200);
+
+      const res = await request(app).get('/tasks?status=in-progress&sort=priority').expect(200);
+      res.body.forEach(t => assert.equal(t.status, 'in-progress'));
+      const priorities = res.body.map(t => t.priority);
+      const firstHigh = priorities.indexOf('high');
+      const lastLow = priorities.lastIndexOf('low');
+      assert.ok(firstHigh < lastLow, 'high should come before low in filtered results');
+    });
+
+    it('existing tasks have priority = medium (backward compat)', async () => {
+      const res = await request(app).get('/tasks').expect(200);
+      res.body.forEach(t => {
+        assert.ok(['low', 'medium', 'high'].includes(t.priority), `task ${t.id} has invalid priority: ${t.priority}`);
+      });
     });
 
     it('responds within 100ms for 100+ tasks', async () => {

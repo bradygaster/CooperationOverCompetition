@@ -7,9 +7,18 @@ const VALID_TRANSITIONS = {
   'done': [],
 };
 
-function getAll() {
+const PRIORITY_ORDER_SQL = "CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END";
+
+function getAll({ sort, order } = {}) {
   const db = getConnection();
-  return db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all();
+  let sql = 'SELECT * FROM tasks';
+  if (sort === 'priority') {
+    const dir = order === 'desc' ? 'DESC' : 'ASC';
+    sql += ` ORDER BY ${PRIORITY_ORDER_SQL} ${dir}`;
+  } else {
+    sql += ' ORDER BY created_at DESC';
+  }
+  return db.prepare(sql).all();
 }
 
 function getById(id) {
@@ -17,11 +26,11 @@ function getById(id) {
   return db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
 }
 
-function create({ title, description = '' }) {
+function create({ title, description = '', priority = 'medium' }) {
   const db = getConnection();
   const result = db.prepare(
-    `INSERT INTO tasks (title, description) VALUES (?, ?)`
-  ).run(title, description);
+    `INSERT INTO tasks (title, description, priority) VALUES (?, ?, ?)`
+  ).run(title, description, priority);
   return getById(result.lastInsertRowid);
 }
 
@@ -45,10 +54,11 @@ function update(id, fields) {
   const title = fields.title !== undefined ? fields.title : existing.title;
   const description = fields.description !== undefined ? fields.description : existing.description;
   const status = fields.status !== undefined ? fields.status : existing.status;
+  const priority = fields.priority !== undefined ? fields.priority : existing.priority;
 
   db.prepare(
-    `UPDATE tasks SET title = ?, description = ?, status = ?, updated_at = datetime('now') WHERE id = ?`
-  ).run(title, description, status, id);
+    `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, updated_at = datetime('now') WHERE id = ?`
+  ).run(title, description, status, priority, id);
 
   return getById(id);
 }
@@ -61,7 +71,7 @@ function remove(id) {
   return existing;
 }
 
-function getFiltered({ status, search } = {}) {
+function getFiltered({ status, search, sort, order } = {}) {
   const db = getConnection();
   let sql = 'SELECT * FROM tasks';
   const conditions = [];
@@ -81,7 +91,12 @@ function getFiltered({ status, search } = {}) {
     sql += ' WHERE ' + conditions.join(' AND ');
   }
 
-  sql += ' ORDER BY created_at DESC';
+  if (sort === 'priority') {
+    const dir = order === 'desc' ? 'DESC' : 'ASC';
+    sql += ` ORDER BY ${PRIORITY_ORDER_SQL} ${dir}`;
+  } else {
+    sql += ' ORDER BY created_at DESC';
+  }
   return db.prepare(sql).all(...params);
 }
 

@@ -33,6 +33,7 @@ describe('Task model', () => {
       assert.equal(task.title, 'Walk the dog');
       assert.equal(task.description, '');
       assert.equal(task.status, 'todo');
+      assert.equal(task.priority, 'medium');
     });
 
     it('rejects creation without title', () => {
@@ -40,6 +41,16 @@ describe('Task model', () => {
       assert.throws(() => {
         Task.create({});
       });
+    });
+
+    it('creates a task with explicit priority', () => {
+      const task = Task.create({ title: 'Urgent fix', priority: 'high' });
+      assert.equal(task.priority, 'high');
+    });
+
+    it('defaults priority to medium when not specified', () => {
+      const task = Task.create({ title: 'Normal task' });
+      assert.equal(task.priority, 'medium');
     });
   });
 
@@ -130,6 +141,15 @@ describe('Task model', () => {
       const result = Task.update(99999, { title: 'Ghost' });
       assert.equal(result, null);
     });
+
+    it('updates priority without affecting other fields', () => {
+      const task = Task.create({ title: 'Priority update', description: 'keep me', priority: 'low' });
+      const updated = Task.update(task.id, { priority: 'high' });
+      assert.equal(updated.priority, 'high');
+      assert.equal(updated.title, 'Priority update');
+      assert.equal(updated.description, 'keep me');
+      assert.equal(updated.status, 'todo');
+    });
   });
 
   describe('remove', () => {
@@ -190,6 +210,46 @@ describe('Task model', () => {
     it('returns empty array when no tasks match', () => {
       const results = Task.getFiltered({ search: 'zzz_nonexistent_zzz' });
       assert.equal(results.length, 0);
+    });
+  });
+
+  describe('priority sorting', () => {
+    it('getAll sorts by priority ascending (high first)', () => {
+      // Create tasks with different priorities
+      Task.create({ title: 'Low pri', priority: 'low' });
+      Task.create({ title: 'High pri', priority: 'high' });
+      Task.create({ title: 'Med pri', priority: 'medium' });
+
+      const tasks = Task.getAll({ sort: 'priority' });
+      const priorities = tasks.map(t => t.priority);
+      const firstHigh = priorities.indexOf('high');
+      const firstMed = priorities.indexOf('medium');
+      const firstLow = priorities.indexOf('low');
+      assert.ok(firstHigh < firstMed, 'high should come before medium');
+      assert.ok(firstMed < firstLow, 'medium should come before low');
+    });
+
+    it('getAll sorts by priority descending (low first)', () => {
+      const tasks = Task.getAll({ sort: 'priority', order: 'desc' });
+      const priorities = tasks.map(t => t.priority);
+      const firstLow = priorities.indexOf('low');
+      const firstMed = priorities.indexOf('medium');
+      const firstHigh = priorities.indexOf('high');
+      assert.ok(firstLow < firstMed, 'low should come before medium');
+      assert.ok(firstMed < firstHigh, 'medium should come before high');
+    });
+
+    it('getFiltered sorts by priority with status filter', () => {
+      const t1 = Task.create({ title: 'Sort filter low', priority: 'low' });
+      Task.update(t1.id, { status: 'in-progress' });
+      const t2 = Task.create({ title: 'Sort filter high', priority: 'high' });
+      Task.update(t2.id, { status: 'in-progress' });
+
+      const results = Task.getFiltered({ status: 'in-progress', sort: 'priority' });
+      const priorities = results.map(t => t.priority);
+      const firstHigh = priorities.indexOf('high');
+      const lastLow = priorities.lastIndexOf('low');
+      assert.ok(firstHigh < lastLow, 'high should come before low in filtered results');
     });
   });
 });
