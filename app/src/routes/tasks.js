@@ -5,6 +5,36 @@ const VALID_PRIORITIES = ['low', 'medium', 'high'];
 
 const router = Router();
 
+// GET /tasks/export — export all tasks with metadata
+router.get('/export', (req, res) => {
+  const tasks = Task.exportAll();
+  res.json({
+    export_version: '1.0',
+    exported_at: new Date().toISOString(),
+    task_count: tasks.length,
+    tasks,
+  });
+});
+
+// POST /tasks/import — import tasks from JSON
+router.post('/import', (req, res) => {
+  const { tasks } = req.body;
+
+  if (!Array.isArray(tasks)) {
+    return res.status(400).json({ error: 'Request body must contain a "tasks" array' });
+  }
+
+  try {
+    const count = Task.importTasks(tasks);
+    res.json({ imported: count, message: 'Import successful' });
+  } catch (err) {
+    if (err.code === 'IMPORT_FAILED') {
+      return res.status(400).json({ error: err.message });
+    }
+    throw err;
+  }
+});
+
 // GET /tasks — list all tasks (with optional filtering and sorting)
 router.get('/', (req, res) => {
   const { status, search, sort, order } = req.query;

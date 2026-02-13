@@ -205,4 +205,66 @@ function getHistory(taskId, { operation } = {}) {
   }));
 }
 
-module.exports = { getAll, getById, getFiltered, create, update, remove, bulkUpdateStatus, bulkRemove, getHistory, VALID_TRANSITIONS };
+function exportAll() {
+  const db = getConnection();
+  return db.prepare('SELECT * FROM tasks').all();
+}
+
+function importTasks(tasks) {
+  const db = getConnection();
+  const VALID_STATUSES = ['todo', 'in-progress', 'done'];
+  const VALID_PRIORITIES = ['low', 'medium', 'high'];
+
+  const txn = db.transaction(() => {
+    for (const task of tasks) {
+      if (!task.title || typeof task.title !== 'string' || !task.title.trim()) {
+        const err = new Error('Import failed: each task must have a non-empty title');
+        err.code = 'IMPORT_FAILED';
+        throw err;
+      }
+      if (!task.status || !VALID_STATUSES.includes(task.status)) {
+        const err = new Error('Import failed: each task must have a valid status (todo, in-progress, done)');
+        err.code = 'IMPORT_FAILED';
+        throw err;
+      }
+      if (task.priority !== undefined && task.priority !== null && !VALID_PRIORITIES.includes(task.priority)) {
+        const err = new Error('Import failed: priority must be one of: low, medium, high');
+        err.code = 'IMPORT_FAILED';
+        throw err;
+      }
+
+      const description = task.description || '';
+      const priority = task.priority || 'medium';
+
+      if (task.id) {
+        const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id);
+        if (existing) {
+          db.prepare(
+            `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, updated_at = datetime('now') WHERE id = ?`
+          ).run(task.title, description, task.status, priority, task.id);
+        } else {
+          db.prepare(
+            `INSERT INTO tasks (id, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, COALESCE(?, datetime('now')), datetime('now'))`
+          ).run(task.id, task.title, description, task.status, priority, task.created_at || null);
+        }
+      } else {
+        db.prepare(
+          `INSERT INTO tasks (title, description, status, priority) VALUES (?, ?, ?, ?)`
+        ).run(task.title, description, task.status, priority);
+      }
+    }
+
+    // Log a single audit entry for the entire import
+    logAudit(db, 0, 'import', {
+      task_count: tasks.length,
+      file_size: JSON.stringify({ tasks }).length,
+      outcome: 'success',
+    });
+
+    return tasks.length;
+  });
+
+  return txn();
+}
+
+module.exports = { getAll, getById, getFiltered, create, update, remove, bulkUpdateStatus, bulkRemove, getHistory, exportAll, importTasks, VALID_TRANSITIONS };

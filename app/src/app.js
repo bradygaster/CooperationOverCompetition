@@ -6,7 +6,7 @@ function createApp() {
   migrate();
 
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
   app.use('/tasks', taskRoutes);
 
   return app;
