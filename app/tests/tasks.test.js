@@ -336,6 +336,118 @@ describe('Task API', () => {
     });
   });
 
+  describe('PATCH /tasks/bulk', () => {
+    it('updates all tasks with valid IDs and status', async () => {
+      const t1 = await request(app).post('/tasks').send({ title: 'Bulk 1' }).expect(201);
+      const t2 = await request(app).post('/tasks').send({ title: 'Bulk 2' }).expect(201);
+      const t3 = await request(app).post('/tasks').send({ title: 'Bulk 3' }).expect(201);
+
+      const res = await request(app)
+        .patch('/tasks/bulk')
+        .send({ ids: [t1.body.id, t2.body.id, t3.body.id], status: 'in-progress' })
+        .expect(200);
+
+      assert.equal(res.body.length, 3);
+      res.body.forEach(t => assert.equal(t.status, 'in-progress'));
+    });
+
+    it('marks all three as done with body { ids, status: "done" }', async () => {
+      const t1 = await request(app).post('/tasks').send({ title: 'Done 1' }).expect(201);
+      const t2 = await request(app).post('/tasks').send({ title: 'Done 2' }).expect(201);
+      const t3 = await request(app).post('/tasks').send({ title: 'Done 3' }).expect(201);
+      // Move to in-progress first
+      await request(app).patch(`/tasks/${t1.body.id}`).send({ status: 'in-progress' }).expect(200);
+      await request(app).patch(`/tasks/${t2.body.id}`).send({ status: 'in-progress' }).expect(200);
+      await request(app).patch(`/tasks/${t3.body.id}`).send({ status: 'in-progress' }).expect(200);
+
+      const res = await request(app)
+        .patch('/tasks/bulk')
+        .send({ ids: [t1.body.id, t2.body.id, t3.body.id], status: 'done' })
+        .expect(200);
+
+      assert.equal(res.body.length, 3);
+      res.body.forEach(t => assert.equal(t.status, 'done'));
+    });
+
+    it('returns 400 with non-existent ID (transaction rolled back)', async () => {
+      const t1 = await request(app).post('/tasks').send({ title: 'Exists' }).expect(201);
+
+      const res = await request(app)
+        .patch('/tasks/bulk')
+        .send({ ids: [t1.body.id, 99999], status: 'in-progress' })
+        .expect(400);
+
+      assert.ok(res.body.error);
+      // Verify rollback: t1 should still be 'todo'
+      const check = await request(app).get(`/tasks/${t1.body.id}`).expect(200);
+      assert.equal(check.body.status, 'todo');
+    });
+
+    it('returns 400 with invalid status', async () => {
+      const t1 = await request(app).post('/tasks').send({ title: 'Invalid status' }).expect(201);
+
+      const res = await request(app)
+        .patch('/tasks/bulk')
+        .send({ ids: [t1.body.id], status: 'invalid' })
+        .expect(400);
+
+      assert.ok(res.body.error);
+    });
+
+    it('returns 400 with empty array', async () => {
+      const res = await request(app)
+        .patch('/tasks/bulk')
+        .send({ ids: [], status: 'in-progress' })
+        .expect(400);
+
+      assert.ok(res.body.error);
+    });
+
+    it('respects state machine rules (rejects invalid transition)', async () => {
+      const t1 = await request(app).post('/tasks').send({ title: 'SM test' }).expect(201);
+
+      const res = await request(app)
+        .patch('/tasks/bulk')
+        .send({ ids: [t1.body.id], status: 'done' })
+        .expect(400);
+
+      assert.ok(res.body.error);
+      assert.ok(res.body.error.includes('Invalid status transition'));
+    });
+  });
+
+  describe('DELETE /tasks/bulk', () => {
+    it('deletes all specified tasks with valid IDs', async () => {
+      const t1 = await request(app).post('/tasks').send({ title: 'Del bulk 1' }).expect(201);
+      const t2 = await request(app).post('/tasks').send({ title: 'Del bulk 2' }).expect(201);
+      const t3 = await request(app).post('/tasks').send({ title: 'Del bulk 3' }).expect(201);
+
+      const res = await request(app)
+        .delete('/tasks/bulk')
+        .send({ ids: [t1.body.id, t2.body.id, t3.body.id] })
+        .expect(200);
+
+      assert.equal(res.body.length, 3);
+      // Verify they're gone
+      await request(app).get(`/tasks/${t1.body.id}`).expect(404);
+      await request(app).get(`/tasks/${t2.body.id}`).expect(404);
+      await request(app).get(`/tasks/${t3.body.id}`).expect(404);
+    });
+
+    it('returns 400 with non-existent ID (transaction rolled back)', async () => {
+      const t1 = await request(app).post('/tasks').send({ title: 'Del rollback' }).expect(201);
+
+      const res = await request(app)
+        .delete('/tasks/bulk')
+        .send({ ids: [t1.body.id, 99999] })
+        .expect(400);
+
+      assert.ok(res.body.error);
+      // Verify rollback: t1 should still exist
+      await request(app).get(`/tasks/${t1.body.id}`).expect(200);
+    });
+  });
+
   describe('DELETE /tasks/:id', () => {
     it('removes a task and returns it', async () => {
       const created = await request(app)

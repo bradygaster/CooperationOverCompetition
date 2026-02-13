@@ -213,6 +213,81 @@ describe('Task model', () => {
     });
   });
 
+  describe('bulkUpdateStatus', () => {
+    it('updates multiple tasks in a transaction', () => {
+      const t1 = Task.create({ title: 'Bulk up 1' });
+      const t2 = Task.create({ title: 'Bulk up 2' });
+      const result = Task.bulkUpdateStatus([t1.id, t2.id], 'in-progress');
+      assert.equal(result.length, 2);
+      result.forEach(t => assert.equal(t.status, 'in-progress'));
+    });
+
+    it('throws and rolls back when a task does not exist', () => {
+      const t1 = Task.create({ title: 'Bulk exist' });
+      assert.throws(() => {
+        Task.bulkUpdateStatus([t1.id, 99999], 'in-progress');
+      }, (err) => {
+        assert.equal(err.code, 'BULK_FAILED');
+        return true;
+      });
+      // Verify rollback
+      const check = Task.getById(t1.id);
+      assert.equal(check.status, 'todo');
+    });
+
+    it('throws and rolls back on invalid status transition', () => {
+      const t1 = Task.create({ title: 'Bulk transition' });
+      assert.throws(() => {
+        Task.bulkUpdateStatus([t1.id], 'done');
+      }, (err) => {
+        assert.equal(err.code, 'BULK_FAILED');
+        assert.ok(err.message.includes('Invalid status transition'));
+        return true;
+      });
+      const check = Task.getById(t1.id);
+      assert.equal(check.status, 'todo');
+    });
+
+    it('rolls back all when one task has invalid transition', () => {
+      const t1 = Task.create({ title: 'Bulk mixed 1' });
+      const t2 = Task.create({ title: 'Bulk mixed 2' });
+      Task.update(t2.id, { status: 'in-progress' });
+      Task.update(t2.id, { status: 'done' });
+      // t1 is 'todo', t2 is 'done' — transitioning to 'in-progress' works for t1 but not t2
+      assert.throws(() => {
+        Task.bulkUpdateStatus([t1.id, t2.id], 'in-progress');
+      }, (err) => {
+        assert.equal(err.code, 'BULK_FAILED');
+        return true;
+      });
+      // t1 should still be 'todo' due to rollback
+      assert.equal(Task.getById(t1.id).status, 'todo');
+    });
+  });
+
+  describe('bulkRemove', () => {
+    it('removes multiple tasks in a transaction', () => {
+      const t1 = Task.create({ title: 'Bulk rm 1' });
+      const t2 = Task.create({ title: 'Bulk rm 2' });
+      const result = Task.bulkRemove([t1.id, t2.id]);
+      assert.equal(result.length, 2);
+      assert.equal(Task.getById(t1.id), undefined);
+      assert.equal(Task.getById(t2.id), undefined);
+    });
+
+    it('throws and rolls back when a task does not exist', () => {
+      const t1 = Task.create({ title: 'Bulk rm exist' });
+      assert.throws(() => {
+        Task.bulkRemove([t1.id, 99999]);
+      }, (err) => {
+        assert.equal(err.code, 'BULK_FAILED');
+        return true;
+      });
+      // Verify rollback: t1 should still exist
+      assert.ok(Task.getById(t1.id));
+    });
+  });
+
   describe('priority sorting', () => {
     it('getAll sorts by priority ascending (high first)', () => {
       // Create tasks with different priorities

@@ -26,6 +26,53 @@ router.get('/', (req, res) => {
   res.json(tasks);
 });
 
+// PATCH /tasks/bulk — bulk status update
+router.patch('/bulk', (req, res) => {
+  const { ids, status } = req.body;
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'ids must be a non-empty array' });
+  }
+  if (ids.length > 100) {
+    return res.status(400).json({ error: 'Maximum 100 tasks per bulk operation' });
+  }
+  if (!status || !['todo', 'in-progress', 'done'].includes(status)) {
+    return res.status(400).json({ error: 'status must be one of: todo, in-progress, done' });
+  }
+
+  try {
+    const updated = Task.bulkUpdateStatus(ids, status);
+    res.json(updated);
+  } catch (err) {
+    if (err.code === 'BULK_FAILED') {
+      return res.status(400).json({ error: err.message });
+    }
+    throw err;
+  }
+});
+
+// DELETE /tasks/bulk — bulk delete
+router.delete('/bulk', (req, res) => {
+  const { ids } = req.body;
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'ids must be a non-empty array' });
+  }
+  if (ids.length > 100) {
+    return res.status(400).json({ error: 'Maximum 100 tasks per bulk operation' });
+  }
+
+  try {
+    const removed = Task.bulkRemove(ids);
+    res.json(removed);
+  } catch (err) {
+    if (err.code === 'BULK_FAILED') {
+      return res.status(400).json({ error: err.message });
+    }
+    throw err;
+  }
+});
+
 // GET /tasks/:id — get one task
 router.get('/:id', (req, res) => {
   const task = Task.getById(req.params.id);

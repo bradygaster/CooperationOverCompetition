@@ -100,4 +100,54 @@ function getFiltered({ status, search, sort, order } = {}) {
   return db.prepare(sql).all(...params);
 }
 
-module.exports = { getAll, getById, getFiltered, create, update, remove, VALID_TRANSITIONS };
+function bulkUpdateStatus(ids, status) {
+  const db = getConnection();
+  const txn = db.transaction(() => {
+    const updated = [];
+    for (const id of ids) {
+      const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+      if (!existing) {
+        const err = new Error(`Bulk operation failed: Task ${id} not found`);
+        err.code = 'BULK_FAILED';
+        throw err;
+      }
+      if (existing.status !== status) {
+        const allowed = VALID_TRANSITIONS[existing.status] || [];
+        if (!allowed.includes(status)) {
+          const err = new Error(
+            `Bulk operation failed: Invalid status transition: ${existing.status} → ${status} for task ${id}`
+          );
+          err.code = 'BULK_FAILED';
+          throw err;
+        }
+      }
+      db.prepare(
+        `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`
+      ).run(status, id);
+      updated.push(db.prepare('SELECT * FROM tasks WHERE id = ?').get(id));
+    }
+    return updated;
+  });
+  return txn();
+}
+
+function bulkRemove(ids) {
+  const db = getConnection();
+  const txn = db.transaction(() => {
+    const removed = [];
+    for (const id of ids) {
+      const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+      if (!existing) {
+        const err = new Error(`Bulk operation failed: Task ${id} not found`);
+        err.code = 'BULK_FAILED';
+        throw err;
+      }
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+      removed.push(existing);
+    }
+    return removed;
+  });
+  return txn();
+}
+
+module.exports = { getAll, getById, getFiltered, create, update, remove, bulkUpdateStatus, bulkRemove, VALID_TRANSITIONS };
