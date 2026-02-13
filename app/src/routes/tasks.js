@@ -1,8 +1,52 @@
+const express = require('express');
 const { Router } = require('express');
 const Task = require('../models/task');
 const AuditLog = require('../models/auditLog');
 
 const router = Router();
+
+const MAX_IMPORT_SIZE = 10 * 1024 * 1024; // 10MB
+
+// GET /tasks/export — export all tasks
+router.get('/export', (req, res) => {
+  const data = Task.exportAll();
+  res.json(data);
+});
+
+// POST /tasks/import — import tasks from JSON
+router.post('/import', express.json({ limit: '10mb' }), (req, res) => {
+  const body = req.body;
+
+  if (!body || !Array.isArray(body.tasks)) {
+    return res.status(400).json({ error: 'Request body must contain a "tasks" array' });
+  }
+
+  const contentLength = req.headers['content-length'];
+  if (contentLength && parseInt(contentLength, 10) > MAX_IMPORT_SIZE) {
+    return res.status(400).json({ error: 'Import file exceeds maximum size of 10MB' });
+  }
+
+  try {
+    const imported = Task.importTasks(body.tasks);
+
+    // Log a single audit event for the import
+    const fileSize = contentLength ? parseInt(contentLength, 10) : JSON.stringify(body).length;
+    AuditLog.insertLog(0, 'import', null,
+      JSON.stringify({ file_size: fileSize, task_count: imported.length }),
+      JSON.stringify({ outcome: 'success' })
+    );
+
+    res.json({
+      imported: imported.length,
+      tasks: imported,
+    });
+  } catch (err) {
+    if (err.code === 'INVALID_IMPORT') {
+      return res.status(400).json({ error: err.message });
+    }
+    throw err;
+  }
+});
 
 // GET /tasks — list tasks with optional filtering
 router.get('/', (req, res) => {
@@ -49,8 +93,8 @@ router.delete('/bulk', (req, res) => {
 // GET /tasks/:id/history — get audit log for a task
 router.get('/:id/history', (req, res) => {
   const { operation } = req.query;
-  if (operation && !['create', 'update', 'delete'].includes(operation)) {
-    return res.status(400).json({ error: 'operation must be one of: create, update, delete' });
+  if (operation && !['create', 'update', 'delete', 'import'].includes(operation)) {
+    return res.status(400).json({ error: 'operation must be one of: create, update, delete, import' });
   }
   const history = AuditLog.getHistory(req.params.id, { operation });
   res.json(history);

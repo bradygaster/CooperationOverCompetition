@@ -242,4 +242,97 @@ function bulkDelete(ids) {
   return txn();
 }
 
-module.exports = { getAll, getFiltered, getById, create, update, remove, bulkUpdateStatus, bulkDelete, VALID_TRANSITIONS, VALID_STATUSES, VALID_PRIORITIES };
+function exportAll() {
+  const tasks = getAll();
+  return {
+    export_version: '1.0',
+    exported_at: new Date().toISOString(),
+    task_count: tasks.length,
+    tasks,
+  };
+}
+
+function importTasks(tasks) {
+  const db = getConnection();
+
+  // Validate all tasks before importing
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    if (!t.title || typeof t.title !== 'string' || !t.title.trim()) {
+      const err = new Error(`Task at index ${i}: title is required and must be a non-empty string`);
+      err.code = 'INVALID_IMPORT';
+      throw err;
+    }
+    if (t.title.trim().length > 200) {
+      const err = new Error(`Task at index ${i}: title must not exceed 200 characters`);
+      err.code = 'INVALID_IMPORT';
+      throw err;
+    }
+    if (!t.status || !VALID_STATUSES.includes(t.status)) {
+      const err = new Error(`Task at index ${i}: status is required and must be one of: ${VALID_STATUSES.join(', ')}`);
+      err.code = 'INVALID_IMPORT';
+      throw err;
+    }
+    if (t.priority !== undefined && t.priority !== null && !VALID_PRIORITIES.includes(t.priority)) {
+      const err = new Error(`Task at index ${i}: priority must be one of: ${VALID_PRIORITIES.join(', ')}`);
+      err.code = 'INVALID_IMPORT';
+      throw err;
+    }
+  }
+
+  const txn = db.transaction(() => {
+    const imported = [];
+    for (const t of tasks) {
+      const title = t.title.trim();
+      const description = t.description || '';
+      const status = t.status;
+      const priority = t.priority || 'medium';
+      const created_at = t.created_at || null;
+      const updated_at = t.updated_at || null;
+
+      if (t.id) {
+        const existing = getById(t.id);
+        if (existing) {
+          // Overwrite existing task
+          if (created_at && updated_at) {
+            db.prepare(
+              `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, created_at = ?, updated_at = ? WHERE id = ?`
+            ).run(title, description, status, priority, created_at, updated_at, t.id);
+          } else if (created_at) {
+            db.prepare(
+              `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, created_at = ?, updated_at = datetime('now') WHERE id = ?`
+            ).run(title, description, status, priority, created_at, t.id);
+          } else {
+            db.prepare(
+              `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, updated_at = datetime('now') WHERE id = ?`
+            ).run(title, description, status, priority, t.id);
+          }
+          imported.push(getById(t.id));
+        } else {
+          // Insert with specific ID
+          if (created_at && updated_at) {
+            db.prepare(
+              `INSERT INTO tasks (id, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+            ).run(t.id, title, description, status, priority, created_at, updated_at);
+          } else {
+            db.prepare(
+              `INSERT INTO tasks (id, title, description, status, priority) VALUES (?, ?, ?, ?, ?)`
+            ).run(t.id, title, description, status, priority);
+          }
+          imported.push(getById(t.id));
+        }
+      } else {
+        // Insert without specific ID
+        const result = db.prepare(
+          `INSERT INTO tasks (title, description, status, priority) VALUES (?, ?, ?, ?)`
+        ).run(title, description, status, priority);
+        imported.push(getById(result.lastInsertRowid));
+      }
+    }
+    return imported;
+  });
+
+  return txn();
+}
+
+module.exports = { getAll, getFiltered, getById, create, update, remove, bulkUpdateStatus, bulkDelete, exportAll, importTasks, VALID_TRANSITIONS, VALID_STATUSES, VALID_PRIORITIES };
