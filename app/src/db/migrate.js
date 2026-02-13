@@ -20,6 +20,18 @@ function migrate() {
   if (!hasPriority) {
     db.exec(`ALTER TABLE tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low', 'medium', 'high'))`);
   }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL,
+      operation TEXT NOT NULL CHECK(operation IN ('create', 'update', 'delete')),
+      field_name TEXT,
+      old_value TEXT,
+      new_value TEXT,
+      timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
 }
 
 module.exports = { migrate };

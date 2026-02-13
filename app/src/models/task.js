@@ -1,4 +1,5 @@
 const { getConnection } = require('../db/connection');
+const { insertLog } = require('./auditLog');
 
 // Valid status transitions: forward only, no skipping
 const VALID_TRANSITIONS = {
@@ -60,10 +61,22 @@ function create({ title, description = '', priority = 'medium' }) {
     err.code = 'INVALID_PRIORITY';
     throw err;
   }
-  const result = db.prepare(
-    `INSERT INTO tasks (title, description, priority) VALUES (?, ?, ?)`
-  ).run(title, description, priority);
-  return getById(result.lastInsertRowid);
+
+  const txn = db.transaction(() => {
+    const result = db.prepare(
+      `INSERT INTO tasks (title, description, priority) VALUES (?, ?, ?)`
+    ).run(title, description, priority);
+    const task = getById(result.lastInsertRowid);
+    insertLog(task.id, 'create', null, null, JSON.stringify({
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      priority: task.priority
+    }));
+    return task;
+  });
+
+  return txn();
 }
 
 function update(id, fields) {
@@ -95,19 +108,52 @@ function update(id, fields) {
   const status = fields.status !== undefined ? fields.status : existing.status;
   const priority = fields.priority !== undefined ? fields.priority : existing.priority;
 
-  db.prepare(
-    `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, updated_at = datetime('now') WHERE id = ?`
-  ).run(title, description, status, priority, id);
+  const txn = db.transaction(() => {
+    db.prepare(
+      `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, updated_at = datetime('now') WHERE id = ?`
+    ).run(title, description, status, priority, id);
 
-  return getById(id);
+    // Log changed fields in a single audit entry
+    const changes = {};
+    if (fields.title !== undefined && fields.title !== existing.title) changes.title = { old: existing.title, new: fields.title };
+    if (fields.description !== undefined && fields.description !== existing.description) changes.description = { old: existing.description, new: fields.description };
+    if (fields.status !== undefined && fields.status !== existing.status) changes.status = { old: existing.status, new: fields.status };
+    if (fields.priority !== undefined && fields.priority !== existing.priority) changes.priority = { old: existing.priority, new: fields.priority };
+
+    const changedKeys = Object.keys(changes);
+    if (changedKeys.length > 0) {
+      if (changedKeys.length === 1) {
+        const key = changedKeys[0];
+        insertLog(id, 'update', key, changes[key].old, changes[key].new);
+      } else {
+        const oldValues = {};
+        const newValues = {};
+        for (const key of changedKeys) {
+          oldValues[key] = changes[key].old;
+          newValues[key] = changes[key].new;
+        }
+        insertLog(id, 'update', changedKeys.join(','), JSON.stringify(oldValues), JSON.stringify(newValues));
+      }
+    }
+
+    return getById(id);
+  });
+
+  return txn();
 }
 
 function remove(id) {
   const db = getConnection();
   const existing = getById(id);
   if (!existing) return null;
-  db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
-  return existing;
+
+  const txn = db.transaction(() => {
+    insertLog(id, 'delete', null, JSON.stringify(existing), null);
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+    return existing;
+  });
+
+  return txn();
 }
 
 function bulkUpdateStatus(ids, status) {
@@ -148,9 +194,13 @@ function bulkUpdateStatus(ids, status) {
           throw err;
         }
       }
+      const oldStatus = existing.status;
       db.prepare(
         `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`
       ).run(status, id);
+      if (oldStatus !== status) {
+        insertLog(id, 'update', 'status', oldStatus, status);
+      }
       updated.push(getById(id));
     }
     return updated;
@@ -182,6 +232,7 @@ function bulkDelete(ids) {
         err.code = 'NOT_FOUND';
         throw err;
       }
+      insertLog(id, 'delete', null, JSON.stringify(existing), null);
       db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
       deleted.push(existing);
     }

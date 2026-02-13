@@ -1,5 +1,6 @@
 const { Router } = require('express');
 const Task = require('../models/task');
+const AuditLog = require('../models/auditLog');
 
 const router = Router();
 
@@ -43,6 +44,16 @@ router.delete('/bulk', (req, res) => {
     }
     throw err;
   }
+});
+
+// GET /tasks/:id/history — get audit log for a task
+router.get('/:id/history', (req, res) => {
+  const { operation } = req.query;
+  if (operation && !['create', 'update', 'delete'].includes(operation)) {
+    return res.status(400).json({ error: 'operation must be one of: create, update, delete' });
+  }
+  const history = AuditLog.getHistory(req.params.id, { operation });
+  res.json(history);
 });
 
 // GET /tasks/:id — get one task
