@@ -189,4 +189,93 @@ describe('Task model', () => {
       assert.equal(result, null);
     });
   });
+
+  describe('priority', () => {
+    it('defaults to medium when not specified', () => {
+      const task = Task.create({ title: 'Default priority' });
+      assert.equal(task.priority, 'medium');
+    });
+
+    it('creates a task with explicit priority', () => {
+      const task = Task.create({ title: 'High priority', priority: 'high' });
+      assert.equal(task.priority, 'high');
+    });
+
+    it('accepts all valid priority values', () => {
+      const low = Task.create({ title: 'Low', priority: 'low' });
+      const med = Task.create({ title: 'Med', priority: 'medium' });
+      const high = Task.create({ title: 'High2', priority: 'high' });
+      assert.equal(low.priority, 'low');
+      assert.equal(med.priority, 'medium');
+      assert.equal(high.priority, 'high');
+    });
+
+    it('rejects invalid priority', () => {
+      assert.throws(() => {
+        Task.create({ title: 'Bad priority', priority: 'urgent' });
+      }, (err) => {
+        assert.equal(err.code, 'INVALID_PRIORITY');
+        return true;
+      });
+    });
+
+    it('updates priority without affecting other fields', () => {
+      const task = Task.create({ title: 'Update prio', description: 'desc', priority: 'low' });
+      const updated = Task.update(task.id, { priority: 'high' });
+      assert.equal(updated.priority, 'high');
+      assert.equal(updated.title, 'Update prio');
+      assert.equal(updated.description, 'desc');
+      assert.equal(updated.status, 'todo');
+    });
+
+    it('rejects invalid priority on update', () => {
+      const task = Task.create({ title: 'Bad update prio' });
+      assert.throws(() => {
+        Task.update(task.id, { priority: 'critical' });
+      }, (err) => {
+        assert.equal(err.code, 'INVALID_PRIORITY');
+        return true;
+      });
+    });
+
+    it('sorts by priority high → medium → low (default asc)', () => {
+      // Clear by creating fresh tasks with unique titles
+      const low = Task.create({ title: 'Sort-Low', priority: 'low' });
+      const high = Task.create({ title: 'Sort-High', priority: 'high' });
+      const med = Task.create({ title: 'Sort-Med', priority: 'medium' });
+
+      const results = Task.getFiltered({ search: 'Sort-', sort: 'priority' });
+      assert.ok(results.length >= 3);
+      const priorities = results.map(t => t.priority);
+      // high should come before medium, medium before low
+      const highIdx = priorities.indexOf('high');
+      const medIdx = priorities.indexOf('medium');
+      const lowIdx = priorities.indexOf('low');
+      assert.ok(highIdx < medIdx, 'high should come before medium');
+      assert.ok(medIdx < lowIdx, 'medium should come before low');
+    });
+
+    it('sorts by priority low → medium → high (desc)', () => {
+      const results = Task.getFiltered({ search: 'Sort-', sort: 'priority', order: 'desc' });
+      assert.ok(results.length >= 3);
+      const priorities = results.map(t => t.priority);
+      const lowIdx = priorities.indexOf('low');
+      const medIdx = priorities.indexOf('medium');
+      const highIdx = priorities.indexOf('high');
+      assert.ok(lowIdx < medIdx, 'low should come before medium in desc');
+      assert.ok(medIdx < highIdx, 'medium should come before high in desc');
+    });
+
+    it('priority sort works with status filter', () => {
+      const t1 = Task.create({ title: 'Prio-Status-Low', priority: 'low' });
+      const t2 = Task.create({ title: 'Prio-Status-High', priority: 'high' });
+      // both are 'todo' status
+      const results = Task.getFiltered({ status: 'todo', sort: 'priority', search: 'Prio-Status' });
+      assert.ok(results.length >= 2);
+      const titles = results.map(t => t.title);
+      const highIdx = titles.indexOf('Prio-Status-High');
+      const lowIdx = titles.indexOf('Prio-Status-Low');
+      assert.ok(highIdx < lowIdx, 'high priority should come first');
+    });
+  });
 });

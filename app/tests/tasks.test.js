@@ -240,4 +240,100 @@ describe('Task API', () => {
       assert.ok(res.body.error);
     });
   });
+
+  describe('Priority', () => {
+    it('creates a task with default priority medium', async () => {
+      const res = await request(app)
+        .post('/tasks')
+        .send({ title: 'Default prio task' })
+        .expect(201);
+
+      assert.equal(res.body.priority, 'medium');
+    });
+
+    it('creates a task with explicit priority', async () => {
+      const res = await request(app)
+        .post('/tasks')
+        .send({ title: 'High prio', priority: 'high' })
+        .expect(201);
+
+      assert.equal(res.body.priority, 'high');
+    });
+
+    it('returns 400 for invalid priority on create', async () => {
+      const res = await request(app)
+        .post('/tasks')
+        .send({ title: 'Bad prio', priority: 'urgent' })
+        .expect(400);
+
+      assert.ok(res.body.error);
+    });
+
+    it('updates priority via PATCH without affecting other fields', async () => {
+      const created = await request(app)
+        .post('/tasks')
+        .send({ title: 'Patch prio', description: 'keep me', priority: 'low' })
+        .expect(201);
+
+      const res = await request(app)
+        .patch(`/tasks/${created.body.id}`)
+        .send({ priority: 'high' })
+        .expect(200);
+
+      assert.equal(res.body.priority, 'high');
+      assert.equal(res.body.title, 'Patch prio');
+      assert.equal(res.body.description, 'keep me');
+      assert.equal(res.body.status, 'todo');
+    });
+
+    it('returns 400 for invalid priority on PATCH', async () => {
+      const created = await request(app)
+        .post('/tasks')
+        .send({ title: 'Bad patch prio' })
+        .expect(201);
+
+      const res = await request(app)
+        .patch(`/tasks/${created.body.id}`)
+        .send({ priority: 'critical' })
+        .expect(400);
+
+      assert.ok(res.body.error);
+    });
+
+    it('sorts by priority high → medium → low', async () => {
+      await request(app).post('/tasks').send({ title: 'API-Sort-Low', priority: 'low' }).expect(201);
+      await request(app).post('/tasks').send({ title: 'API-Sort-High', priority: 'high' }).expect(201);
+      await request(app).post('/tasks').send({ title: 'API-Sort-Med', priority: 'medium' }).expect(201);
+
+      const res = await request(app).get('/tasks?sort=priority&search=API-Sort').expect(200);
+      const priorities = res.body.map(t => t.priority);
+      const highIdx = priorities.indexOf('high');
+      const medIdx = priorities.indexOf('medium');
+      const lowIdx = priorities.indexOf('low');
+      assert.ok(highIdx < medIdx, 'high before medium');
+      assert.ok(medIdx < lowIdx, 'medium before low');
+    });
+
+    it('sorts by priority low → medium → high with order=desc', async () => {
+      const res = await request(app).get('/tasks?sort=priority&order=desc&search=API-Sort').expect(200);
+      const priorities = res.body.map(t => t.priority);
+      const lowIdx = priorities.indexOf('low');
+      const medIdx = priorities.indexOf('medium');
+      const highIdx = priorities.indexOf('high');
+      assert.ok(lowIdx < medIdx, 'low before medium in desc');
+      assert.ok(medIdx < highIdx, 'medium before high in desc');
+    });
+
+    it('priority sort works with status filter', async () => {
+      await request(app).post('/tasks').send({ title: 'API-PS-Low', priority: 'low' }).expect(201);
+      await request(app).post('/tasks').send({ title: 'API-PS-High', priority: 'high' }).expect(201);
+
+      const res = await request(app).get('/tasks?status=todo&sort=priority&search=API-PS').expect(200);
+      assert.ok(res.body.length >= 2);
+      const titles = res.body.map(t => t.title);
+      const highIdx = titles.indexOf('API-PS-High');
+      const lowIdx = titles.indexOf('API-PS-Low');
+      assert.ok(highIdx < lowIdx, 'high priority should come first');
+    });
+  });
 });

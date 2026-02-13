@@ -5,9 +5,9 @@ const router = Router();
 
 // GET /tasks — list tasks with optional filtering
 router.get('/', (req, res) => {
-  const { status, search } = req.query;
+  const { status, search, sort, order } = req.query;
   try {
-    const tasks = Task.getFiltered({ status, search });
+    const tasks = Task.getFiltered({ status, search, sort, order });
     res.json(tasks);
   } catch (err) {
     if (err.code === 'INVALID_STATUS') {
@@ -26,17 +26,20 @@ router.get('/:id', (req, res) => {
 
 // POST /tasks — create a task
 router.post('/', (req, res) => {
-  const { title, description } = req.body;
+  const { title, description, priority } = req.body;
   if (!title || typeof title !== 'string' || !title.trim()) {
     return res.status(400).json({ error: 'title is required and must be a non-empty string' });
   }
-  const task = Task.create({ title: title.trim(), description: description || '' });
+  if (priority !== undefined && !['low', 'medium', 'high'].includes(priority)) {
+    return res.status(400).json({ error: 'priority must be one of: low, medium, high' });
+  }
+  const task = Task.create({ title: title.trim(), description: description || '', priority });
   res.status(201).json(task);
 });
 
 // PATCH /tasks/:id — update a task
 router.patch('/:id', (req, res) => {
-  const { title, description, status } = req.body;
+  const { title, description, status, priority } = req.body;
 
   // Validate title if provided
   if (title !== undefined && (typeof title !== 'string' || !title.trim())) {
@@ -48,11 +51,17 @@ router.patch('/:id', (req, res) => {
     return res.status(400).json({ error: 'status must be one of: todo, in-progress, done' });
   }
 
+  // Validate priority if provided
+  if (priority !== undefined && !['low', 'medium', 'high'].includes(priority)) {
+    return res.status(400).json({ error: 'priority must be one of: low, medium, high' });
+  }
+
   try {
     const fields = {};
     if (title !== undefined) fields.title = title.trim();
     if (description !== undefined) fields.description = description;
     if (status !== undefined) fields.status = status;
+    if (priority !== undefined) fields.priority = priority;
 
     const task = Task.update(req.params.id, fields);
     if (!task) return res.status(404).json({ error: 'Task not found' });
