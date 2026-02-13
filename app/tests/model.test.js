@@ -51,6 +51,47 @@ describe('Task model', () => {
     });
   });
 
+  describe('getFiltered', () => {
+    it('returns all tasks when no filters are given', () => {
+      const all = Task.getAll();
+      const filtered = Task.getFiltered();
+      assert.equal(filtered.length, all.length);
+    });
+
+    it('filters by status', () => {
+      Task.create({ title: 'Model filter todo' });
+      const t = Task.create({ title: 'Model filter progress' });
+      Task.update(t.id, { status: 'in-progress' });
+
+      const results = Task.getFiltered({ status: 'in-progress' });
+      assert.ok(results.every(t => t.status === 'in-progress'));
+    });
+
+    it('filters by search (case-insensitive)', () => {
+      Task.create({ title: 'UPPERCASE test' });
+      Task.create({ title: 'lowercase uppercase mix' });
+
+      const results = Task.getFiltered({ search: 'uppercase' });
+      assert.ok(results.length >= 2);
+      assert.ok(results.every(t => t.title.toLowerCase().includes('uppercase')));
+    });
+
+    it('throws for invalid status', () => {
+      assert.throws(() => {
+        Task.getFiltered({ status: 'invalid' });
+      }, (err) => {
+        assert.equal(err.code, 'INVALID_STATUS');
+        return true;
+      });
+    });
+
+    it('treats empty search as no filter', () => {
+      const all = Task.getAll();
+      const filtered = Task.getFiltered({ search: '' });
+      assert.equal(filtered.length, all.length);
+    });
+  });
+
   describe('getById', () => {
     it('returns a task by ID', () => {
       const created = Task.create({ title: 'Find me' });

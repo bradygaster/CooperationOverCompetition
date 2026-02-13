@@ -60,6 +60,59 @@ describe('Task API', () => {
       assert.ok(Array.isArray(res.body));
       assert.ok(res.body.length >= 1, 'Should have at least the task created above');
     });
+
+    it('filters tasks by status', async () => {
+      // Create tasks with known statuses
+      const t1 = await request(app).post('/tasks').send({ title: 'Filter todo' }).expect(201);
+      const t2 = await request(app).post('/tasks').send({ title: 'Filter progress' }).expect(201);
+      await request(app).patch(`/tasks/${t2.body.id}`).send({ status: 'in-progress' }).expect(200);
+
+      const res = await request(app).get('/tasks?status=todo').expect(200);
+      assert.ok(Array.isArray(res.body));
+      assert.ok(res.body.every(t => t.status === 'todo'), 'All returned tasks should have status todo');
+      assert.ok(res.body.some(t => t.title === 'Filter todo'));
+    });
+
+    it('filters tasks by search (case-insensitive)', async () => {
+      await request(app).post('/tasks').send({ title: 'Buy groceries' }).expect(201);
+      await request(app).post('/tasks').send({ title: 'BUYING supplies' }).expect(201);
+
+      const res = await request(app).get('/tasks?search=buy').expect(200);
+      assert.ok(Array.isArray(res.body));
+      assert.ok(res.body.length >= 2);
+      assert.ok(res.body.every(t => t.title.toLowerCase().includes('buy')));
+    });
+
+    it('combines status and search filters', async () => {
+      await request(app).post('/tasks').send({ title: 'Design homepage' }).expect(201);
+      const t = await request(app).post('/tasks').send({ title: 'Design API' }).expect(201);
+      await request(app).patch(`/tasks/${t.body.id}`).send({ status: 'in-progress' }).expect(200);
+
+      const res = await request(app).get('/tasks?status=in-progress&search=design').expect(200);
+      assert.ok(Array.isArray(res.body));
+      assert.ok(res.body.every(t => t.status === 'in-progress'));
+      assert.ok(res.body.every(t => t.title.toLowerCase().includes('design')));
+      assert.ok(res.body.some(t => t.title === 'Design API'));
+    });
+
+    it('returns 400 for invalid status', async () => {
+      const res = await request(app).get('/tasks?status=invalid').expect(400);
+      assert.ok(res.body.error);
+    });
+
+    it('returns all tasks when search is empty', async () => {
+      const all = await request(app).get('/tasks').expect(200);
+      const filtered = await request(app).get('/tasks?search=').expect(200);
+      assert.equal(all.body.length, filtered.body.length);
+    });
+
+    it('does not return deleted tasks in filtered results', async () => {
+      const created = await request(app).post('/tasks').send({ title: 'DeleteFilterTest' }).expect(201);
+      await request(app).delete(`/tasks/${created.body.id}`).expect(200);
+
+      const res = await request(app).get('/tasks?search=DeleteFilterTest').expect(200);
+      assert.equal(res.body.length, 0);
+    });
   });
 
   describe('GET /tasks/:id', () => {

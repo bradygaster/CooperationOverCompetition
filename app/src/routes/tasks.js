@@ -3,10 +3,18 @@ const Task = require('../models/task');
 
 const router = Router();
 
-// GET /tasks — list all tasks
+// GET /tasks — list tasks with optional filtering
 router.get('/', (req, res) => {
-  const tasks = Task.getAll();
-  res.json(tasks);
+  const { status, search } = req.query;
+  try {
+    const tasks = Task.getFiltered({ status, search });
+    res.json(tasks);
+  } catch (err) {
+    if (err.code === 'INVALID_STATUS') {
+      return res.status(400).json({ error: err.message });
+    }
+    throw err;
+  }
 });
 
 // GET /tasks/:id — get one task

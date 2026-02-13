@@ -7,9 +7,35 @@ const VALID_TRANSITIONS = {
   'done': [],
 };
 
+const VALID_STATUSES = ['todo', 'in-progress', 'done'];
+
 function getAll() {
   const db = getConnection();
   return db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all();
+}
+
+function getFiltered({ status, search } = {}) {
+  const db = getConnection();
+  const conditions = [];
+  const params = [];
+
+  if (status) {
+    if (!VALID_STATUSES.includes(status)) {
+      const err = new Error(`Invalid status: ${status}. Must be one of: ${VALID_STATUSES.join(', ')}`);
+      err.code = 'INVALID_STATUS';
+      throw err;
+    }
+    conditions.push('status = ?');
+    params.push(status);
+  }
+
+  if (search) {
+    conditions.push('title LIKE ?');
+    params.push(`%${search}%`);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return db.prepare(`SELECT * FROM tasks ${where} ORDER BY created_at DESC`).all(...params);
 }
 
 function getById(id) {
@@ -61,4 +87,4 @@ function remove(id) {
   return existing;
 }
 
-module.exports = { getAll, getById, create, update, remove, VALID_TRANSITIONS };
+module.exports = { getAll, getFiltered, getById, create, update, remove, VALID_TRANSITIONS, VALID_STATUSES };
