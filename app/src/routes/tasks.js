@@ -17,6 +17,34 @@ router.get('/', (req, res) => {
   }
 });
 
+// PATCH /tasks/bulk — bulk status update
+router.patch('/bulk', (req, res) => {
+  const { ids, status } = req.body;
+  try {
+    const updated = Task.bulkUpdateStatus(ids, status);
+    res.json(updated);
+  } catch (err) {
+    if (err.code === 'INVALID_INPUT' || err.code === 'INVALID_STATUS' || err.code === 'NOT_FOUND' || err.code === 'INVALID_TRANSITION') {
+      return res.status(400).json({ error: err.message });
+    }
+    throw err;
+  }
+});
+
+// DELETE /tasks/bulk — bulk delete
+router.delete('/bulk', (req, res) => {
+  const { ids } = req.body;
+  try {
+    const deleted = Task.bulkDelete(ids);
+    res.json(deleted);
+  } catch (err) {
+    if (err.code === 'INVALID_INPUT' || err.code === 'NOT_FOUND') {
+      return res.status(400).json({ error: err.message });
+    }
+    throw err;
+  }
+});
+
 // GET /tasks/:id — get one task
 router.get('/:id', (req, res) => {
   const task = Task.getById(req.params.id);

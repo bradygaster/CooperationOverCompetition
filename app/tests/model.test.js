@@ -190,6 +190,91 @@ describe('Task model', () => {
     });
   });
 
+  describe('bulkUpdateStatus', () => {
+    it('updates multiple tasks at once', () => {
+      const t1 = Task.create({ title: 'Bulk M1' });
+      const t2 = Task.create({ title: 'Bulk M2' });
+      const result = Task.bulkUpdateStatus([t1.id, t2.id], 'in-progress');
+      assert.equal(result.length, 2);
+      assert.ok(result.every(t => t.status === 'in-progress'));
+    });
+
+    it('throws for empty array', () => {
+      assert.throws(() => {
+        Task.bulkUpdateStatus([], 'in-progress');
+      }, (err) => {
+        assert.equal(err.code, 'INVALID_INPUT');
+        return true;
+      });
+    });
+
+    it('throws for invalid status', () => {
+      const t = Task.create({ title: 'Bulk bad status' });
+      assert.throws(() => {
+        Task.bulkUpdateStatus([t.id], 'invalid');
+      }, (err) => {
+        assert.equal(err.code, 'INVALID_STATUS');
+        return true;
+      });
+    });
+
+    it('throws for non-existent ID and rolls back', () => {
+      const t = Task.create({ title: 'Bulk rollback' });
+      assert.throws(() => {
+        Task.bulkUpdateStatus([t.id, 99999], 'in-progress');
+      }, (err) => {
+        assert.equal(err.code, 'NOT_FOUND');
+        return true;
+      });
+      // Verify rollback
+      const check = Task.getById(t.id);
+      assert.equal(check.status, 'todo');
+    });
+
+    it('throws for invalid state transition', () => {
+      const t = Task.create({ title: 'Bulk transition' });
+      assert.throws(() => {
+        Task.bulkUpdateStatus([t.id], 'done');
+      }, (err) => {
+        assert.equal(err.code, 'INVALID_TRANSITION');
+        return true;
+      });
+    });
+  });
+
+  describe('bulkDelete', () => {
+    it('deletes multiple tasks at once', () => {
+      const t1 = Task.create({ title: 'BulkDel M1' });
+      const t2 = Task.create({ title: 'BulkDel M2' });
+      const result = Task.bulkDelete([t1.id, t2.id]);
+      assert.equal(result.length, 2);
+      assert.equal(Task.getById(t1.id), undefined);
+      assert.equal(Task.getById(t2.id), undefined);
+    });
+
+    it('throws for empty array', () => {
+      assert.throws(() => {
+        Task.bulkDelete([]);
+      }, (err) => {
+        assert.equal(err.code, 'INVALID_INPUT');
+        return true;
+      });
+    });
+
+    it('throws for non-existent ID and rolls back', () => {
+      const t = Task.create({ title: 'BulkDel rollback' });
+      assert.throws(() => {
+        Task.bulkDelete([t.id, 99999]);
+      }, (err) => {
+        assert.equal(err.code, 'NOT_FOUND');
+        return true;
+      });
+      // Verify rollback
+      const check = Task.getById(t.id);
+      assert.ok(check, 'Task should still exist after rollback');
+    });
+  });
+
   describe('priority', () => {
     it('defaults to medium when not specified', () => {
       const task = Task.create({ title: 'Default priority' });

@@ -110,4 +110,85 @@ function remove(id) {
   return existing;
 }
 
-module.exports = { getAll, getFiltered, getById, create, update, remove, VALID_TRANSITIONS, VALID_STATUSES, VALID_PRIORITIES };
+function bulkUpdateStatus(ids, status) {
+  const db = getConnection();
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    const err = new Error('ids must be a non-empty array');
+    err.code = 'INVALID_INPUT';
+    throw err;
+  }
+  if (ids.length > 100) {
+    const err = new Error('Cannot bulk update more than 100 tasks');
+    err.code = 'INVALID_INPUT';
+    throw err;
+  }
+  if (!VALID_STATUSES.includes(status)) {
+    const err = new Error(`Invalid status: ${status}. Must be one of: ${VALID_STATUSES.join(', ')}`);
+    err.code = 'INVALID_STATUS';
+    throw err;
+  }
+
+  const txn = db.transaction(() => {
+    const updated = [];
+    for (const id of ids) {
+      const existing = getById(id);
+      if (!existing) {
+        const err = new Error(`Task with id ${id} not found`);
+        err.code = 'NOT_FOUND';
+        throw err;
+      }
+      if (existing.status !== status) {
+        const allowed = VALID_TRANSITIONS[existing.status] || [];
+        if (!allowed.includes(status)) {
+          const err = new Error(
+            `Invalid status transition for task ${id}: ${existing.status} → ${status}`
+          );
+          err.code = 'INVALID_TRANSITION';
+          throw err;
+        }
+      }
+      db.prepare(
+        `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`
+      ).run(status, id);
+      updated.push(getById(id));
+    }
+    return updated;
+  });
+
+  return txn();
+}
+
+function bulkDelete(ids) {
+  const db = getConnection();
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    const err = new Error('ids must be a non-empty array');
+    err.code = 'INVALID_INPUT';
+    throw err;
+  }
+  if (ids.length > 100) {
+    const err = new Error('Cannot bulk delete more than 100 tasks');
+    err.code = 'INVALID_INPUT';
+    throw err;
+  }
+
+  const txn = db.transaction(() => {
+    const deleted = [];
+    for (const id of ids) {
+      const existing = getById(id);
+      if (!existing) {
+        const err = new Error(`Task with id ${id} not found`);
+        err.code = 'NOT_FOUND';
+        throw err;
+      }
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+      deleted.push(existing);
+    }
+    return deleted;
+  });
+
+  return txn();
+}
+
+module.exports = { getAll, getFiltered, getById, create, update, remove, bulkUpdateStatus, bulkDelete, VALID_TRANSITIONS, VALID_STATUSES, VALID_PRIORITIES };
