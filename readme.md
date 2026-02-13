@@ -177,7 +177,7 @@ git diff run/specialists..run/generics -- app/src/models/
 
 ## How This Was Built
 
-**Entirely by AI agents using the [Squad agent orchestration system](https://github.com/github/gh-copilot-cli).** No human-written code in the app, routes, or tests — the agents designed, implemented, and evaluated themselves.
+**Entirely by AI agents using the [Squad agent orchestration system](https://github.com/bradygaster/squad).** No human-written code in the app, routes, or tests — the agents designed, implemented, and evaluated themselves.
 
 - **Specialist team orchestration:** 6 agents operating under defined roles and ownership constraints
 - **Generic team orchestration:** 5 identical agents working asynchronously with no boundaries
