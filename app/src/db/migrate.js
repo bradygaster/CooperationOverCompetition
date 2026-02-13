@@ -20,6 +20,16 @@ function migrate() {
   } catch (err) {
     // Column already exists — ignore
   }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL,
+      operation TEXT NOT NULL CHECK(operation IN ('create', 'update', 'delete', 'bulk_update', 'bulk_delete', 'import')),
+      changes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
 }
 
 module.exports = { migrate };

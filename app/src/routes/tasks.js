@@ -73,6 +73,13 @@ router.delete('/bulk', (req, res) => {
   }
 });
 
+// GET /tasks/:id/history — get audit log for a task
+router.get('/:id/history', (req, res) => {
+  const { operation } = req.query;
+  const history = Task.getHistory(req.params.id, { operation });
+  res.json(history);
+});
+
 // GET /tasks/:id — get one task
 router.get('/:id', (req, res) => {
   const task = Task.getById(req.params.id);

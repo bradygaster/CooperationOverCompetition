@@ -26,12 +26,25 @@ function getById(id) {
   return db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
 }
 
+function logAudit(db, taskId, operation, changes) {
+  db.prepare(
+    `INSERT INTO audit_log (task_id, operation, changes) VALUES (?, ?, ?)`
+  ).run(taskId, operation, JSON.stringify(changes));
+}
+
 function create({ title, description = '', priority = 'medium' }) {
   const db = getConnection();
   const result = db.prepare(
     `INSERT INTO tasks (title, description, priority) VALUES (?, ?, ?)`
   ).run(title, description, priority);
-  return getById(result.lastInsertRowid);
+  const task = getById(result.lastInsertRowid);
+  logAudit(db, task.id, 'create', [
+    { field: 'title', old_value: null, new_value: task.title },
+    { field: 'description', old_value: null, new_value: task.description },
+    { field: 'status', old_value: null, new_value: task.status },
+    { field: 'priority', old_value: null, new_value: task.priority },
+  ]);
+  return task;
 }
 
 function update(id, fields) {
@@ -60,6 +73,15 @@ function update(id, fields) {
     `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, updated_at = datetime('now') WHERE id = ?`
   ).run(title, description, status, priority, id);
 
+  const changes = [];
+  if (title !== existing.title) changes.push({ field: 'title', old_value: existing.title, new_value: title });
+  if (description !== existing.description) changes.push({ field: 'description', old_value: existing.description, new_value: description });
+  if (status !== existing.status) changes.push({ field: 'status', old_value: existing.status, new_value: status });
+  if (priority !== existing.priority) changes.push({ field: 'priority', old_value: existing.priority, new_value: priority });
+  if (changes.length > 0) {
+    logAudit(db, id, 'update', changes);
+  }
+
   return getById(id);
 }
 
@@ -67,6 +89,12 @@ function remove(id) {
   const db = getConnection();
   const existing = getById(id);
   if (!existing) return null;
+  logAudit(db, id, 'delete', [
+    { field: 'title', old_value: existing.title, new_value: null },
+    { field: 'description', old_value: existing.description, new_value: null },
+    { field: 'status', old_value: existing.status, new_value: null },
+    { field: 'priority', old_value: existing.priority, new_value: null },
+  ]);
   db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
   return existing;
 }
@@ -124,6 +152,11 @@ function bulkUpdateStatus(ids, status) {
       db.prepare(
         `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`
       ).run(status, id);
+      if (existing.status !== status) {
+        logAudit(db, id, 'bulk_update', [
+          { field: 'status', old_value: existing.status, new_value: status },
+        ]);
+      }
       updated.push(db.prepare('SELECT * FROM tasks WHERE id = ?').get(id));
     }
     return updated;
@@ -142,6 +175,12 @@ function bulkRemove(ids) {
         err.code = 'BULK_FAILED';
         throw err;
       }
+      logAudit(db, id, 'bulk_delete', [
+        { field: 'title', old_value: existing.title, new_value: null },
+        { field: 'description', old_value: existing.description, new_value: null },
+        { field: 'status', old_value: existing.status, new_value: null },
+        { field: 'priority', old_value: existing.priority, new_value: null },
+      ]);
       db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
       removed.push(existing);
     }
@@ -150,4 +189,20 @@ function bulkRemove(ids) {
   return txn();
 }
 
-module.exports = { getAll, getById, getFiltered, create, update, remove, bulkUpdateStatus, bulkRemove, VALID_TRANSITIONS };
+function getHistory(taskId, { operation } = {}) {
+  const db = getConnection();
+  let sql = 'SELECT * FROM audit_log WHERE task_id = ?';
+  const params = [taskId];
+  if (operation) {
+    sql += ' AND operation = ?';
+    params.push(operation);
+  }
+  sql += ' ORDER BY created_at ASC, id ASC';
+  const rows = db.prepare(sql).all(...params);
+  return rows.map(row => ({
+    ...row,
+    changes: row.changes ? JSON.parse(row.changes) : null,
+  }));
+}
+
+module.exports = { getAll, getById, getFiltered, create, update, remove, bulkUpdateStatus, bulkRemove, getHistory, VALID_TRANSITIONS };

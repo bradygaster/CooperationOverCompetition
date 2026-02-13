@@ -288,6 +288,118 @@ describe('Task model', () => {
     });
   });
 
+  describe('getHistory', () => {
+    it('logs create operation with all fields', () => {
+      const task = Task.create({ title: 'Audit create', description: 'desc', priority: 'high' });
+      const history = Task.getHistory(task.id);
+      assert.equal(history.length, 1);
+      assert.equal(history[0].operation, 'create');
+      assert.ok(Array.isArray(history[0].changes));
+      const fields = history[0].changes.map(c => c.field);
+      assert.ok(fields.includes('title'));
+      assert.ok(fields.includes('description'));
+      assert.ok(fields.includes('status'));
+      assert.ok(fields.includes('priority'));
+      const titleChange = history[0].changes.find(c => c.field === 'title');
+      assert.equal(titleChange.old_value, null);
+      assert.equal(titleChange.new_value, 'Audit create');
+    });
+
+    it('logs update operation with old and new status', () => {
+      const task = Task.create({ title: 'Audit update' });
+      Task.update(task.id, { status: 'in-progress' });
+      const history = Task.getHistory(task.id);
+      const updateEntry = history.find(h => h.operation === 'update');
+      assert.ok(updateEntry);
+      const statusChange = updateEntry.changes.find(c => c.field === 'status');
+      assert.equal(statusChange.old_value, 'todo');
+      assert.equal(statusChange.new_value, 'in-progress');
+    });
+
+    it('logs a single entry when updating multiple fields', () => {
+      const task = Task.create({ title: 'Multi field' });
+      Task.update(task.id, { title: 'Updated title', description: 'Updated desc' });
+      const history = Task.getHistory(task.id);
+      const updates = history.filter(h => h.operation === 'update');
+      assert.equal(updates.length, 1);
+      assert.equal(updates[0].changes.length, 2);
+      const fields = updates[0].changes.map(c => c.field);
+      assert.ok(fields.includes('title'));
+      assert.ok(fields.includes('description'));
+    });
+
+    it('logs one entry per task for bulk status updates', () => {
+      const t1 = Task.create({ title: 'Bulk audit 1' });
+      const t2 = Task.create({ title: 'Bulk audit 2' });
+      Task.bulkUpdateStatus([t1.id, t2.id], 'in-progress');
+      const h1 = Task.getHistory(t1.id);
+      const h2 = Task.getHistory(t2.id);
+      const bulk1 = h1.filter(h => h.operation === 'bulk_update');
+      const bulk2 = h2.filter(h => h.operation === 'bulk_update');
+      assert.equal(bulk1.length, 1);
+      assert.equal(bulk2.length, 1);
+    });
+
+    it('logs delete operation', () => {
+      const task = Task.create({ title: 'Audit delete' });
+      const taskId = task.id;
+      Task.remove(taskId);
+      const history = Task.getHistory(taskId);
+      const deleteEntry = history.find(h => h.operation === 'delete');
+      assert.ok(deleteEntry);
+      const titleChange = deleteEntry.changes.find(c => c.field === 'title');
+      assert.equal(titleChange.old_value, 'Audit delete');
+      assert.equal(titleChange.new_value, null);
+    });
+
+    it('returns history in chronological order', () => {
+      const task = Task.create({ title: 'Chrono' });
+      Task.update(task.id, { status: 'in-progress' });
+      Task.update(task.id, { status: 'done' });
+      const history = Task.getHistory(task.id);
+      assert.equal(history[0].operation, 'create');
+      assert.ok(history.length >= 3);
+      for (let i = 1; i < history.length; i++) {
+        assert.ok(history[i].id > history[i - 1].id);
+      }
+    });
+
+    it('filters by operation type', () => {
+      const task = Task.create({ title: 'Filter ops' });
+      Task.update(task.id, { status: 'in-progress' });
+      const updates = Task.getHistory(task.id, { operation: 'update' });
+      assert.ok(updates.length >= 1);
+      updates.forEach(h => assert.equal(h.operation, 'update'));
+    });
+
+    it('returns history for deleted tasks', () => {
+      const task = Task.create({ title: 'Deleted history' });
+      const taskId = task.id;
+      Task.update(taskId, { status: 'in-progress' });
+      Task.remove(taskId);
+      assert.equal(Task.getById(taskId), undefined);
+      const history = Task.getHistory(taskId);
+      assert.ok(history.length >= 3);
+      const ops = history.map(h => h.operation);
+      assert.ok(ops.includes('create'));
+      assert.ok(ops.includes('update'));
+      assert.ok(ops.includes('delete'));
+    });
+
+    it('each entry includes timestamp, operation, and changes', () => {
+      const task = Task.create({ title: 'Entry fields' });
+      const history = Task.getHistory(task.id);
+      assert.ok(history[0].created_at);
+      assert.ok(history[0].operation);
+      assert.ok(Array.isArray(history[0].changes));
+      history[0].changes.forEach(c => {
+        assert.ok('field' in c);
+        assert.ok('old_value' in c);
+        assert.ok('new_value' in c);
+      });
+    });
+  });
+
   describe('priority sorting', () => {
     it('getAll sorts by priority ascending (high first)', () => {
       // Create tasks with different priorities

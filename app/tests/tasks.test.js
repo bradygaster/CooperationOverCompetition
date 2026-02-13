@@ -448,6 +448,188 @@ describe('Task API', () => {
     });
   });
 
+  describe('GET /tasks/:id/history', () => {
+    it('returns audit log for a created task', async () => {
+      const created = await request(app)
+        .post('/tasks')
+        .send({ title: 'History task', description: 'desc', priority: 'high' })
+        .expect(201);
+
+      const res = await request(app)
+        .get(`/tasks/${created.body.id}/history`)
+        .expect(200);
+
+      assert.ok(Array.isArray(res.body));
+      assert.equal(res.body.length, 1);
+      assert.equal(res.body[0].operation, 'create');
+      assert.ok(Array.isArray(res.body[0].changes));
+      const titleChange = res.body[0].changes.find(c => c.field === 'title');
+      assert.equal(titleChange.old_value, null);
+      assert.equal(titleChange.new_value, 'History task');
+    });
+
+    it('logs status update with old and new values', async () => {
+      const created = await request(app)
+        .post('/tasks')
+        .send({ title: 'Status history' })
+        .expect(201);
+
+      await request(app)
+        .patch(`/tasks/${created.body.id}`)
+        .send({ status: 'in-progress' })
+        .expect(200);
+
+      const res = await request(app)
+        .get(`/tasks/${created.body.id}/history`)
+        .expect(200);
+
+      const updateEntry = res.body.find(h => h.operation === 'update');
+      assert.ok(updateEntry);
+      const statusChange = updateEntry.changes.find(c => c.field === 'status');
+      assert.equal(statusChange.old_value, 'todo');
+      assert.equal(statusChange.new_value, 'in-progress');
+    });
+
+    it('logs single entry for multi-field update', async () => {
+      const created = await request(app)
+        .post('/tasks')
+        .send({ title: 'Multi update', description: 'old' })
+        .expect(201);
+
+      await request(app)
+        .patch(`/tasks/${created.body.id}`)
+        .send({ title: 'New title', description: 'new' })
+        .expect(200);
+
+      const res = await request(app)
+        .get(`/tasks/${created.body.id}/history`)
+        .expect(200);
+
+      const updates = res.body.filter(h => h.operation === 'update');
+      assert.equal(updates.length, 1);
+      assert.equal(updates[0].changes.length, 2);
+    });
+
+    it('logs one entry per task for bulk status update', async () => {
+      const t1 = await request(app).post('/tasks').send({ title: 'Bulk hist 1' }).expect(201);
+      const t2 = await request(app).post('/tasks').send({ title: 'Bulk hist 2' }).expect(201);
+
+      await request(app)
+        .patch('/tasks/bulk')
+        .send({ ids: [t1.body.id, t2.body.id], status: 'in-progress' })
+        .expect(200);
+
+      const h1 = await request(app).get(`/tasks/${t1.body.id}/history`).expect(200);
+      const h2 = await request(app).get(`/tasks/${t2.body.id}/history`).expect(200);
+
+      const bulk1 = h1.body.filter(h => h.operation === 'bulk_update');
+      const bulk2 = h2.body.filter(h => h.operation === 'bulk_update');
+      assert.equal(bulk1.length, 1);
+      assert.equal(bulk2.length, 1);
+    });
+
+    it('logs delete operation', async () => {
+      const created = await request(app)
+        .post('/tasks')
+        .send({ title: 'Delete hist' })
+        .expect(201);
+      const taskId = created.body.id;
+
+      await request(app).delete(`/tasks/${taskId}`).expect(200);
+
+      const res = await request(app)
+        .get(`/tasks/${taskId}/history`)
+        .expect(200);
+
+      const deleteEntry = res.body.find(h => h.operation === 'delete');
+      assert.ok(deleteEntry);
+      const titleChange = deleteEntry.changes.find(c => c.field === 'title');
+      assert.equal(titleChange.old_value, 'Delete hist');
+      assert.equal(titleChange.new_value, null);
+    });
+
+    it('returns history in chronological order', async () => {
+      const created = await request(app)
+        .post('/tasks')
+        .send({ title: 'Chrono API' })
+        .expect(201);
+
+      await request(app).patch(`/tasks/${created.body.id}`).send({ status: 'in-progress' }).expect(200);
+      await request(app).patch(`/tasks/${created.body.id}`).send({ status: 'done' }).expect(200);
+
+      const res = await request(app)
+        .get(`/tasks/${created.body.id}/history`)
+        .expect(200);
+
+      assert.ok(res.body.length >= 3);
+      for (let i = 1; i < res.body.length; i++) {
+        assert.ok(res.body[i].id > res.body[i - 1].id);
+      }
+    });
+
+    it('filters by operation type via query param', async () => {
+      const created = await request(app)
+        .post('/tasks')
+        .send({ title: 'Filter API' })
+        .expect(201);
+
+      await request(app).patch(`/tasks/${created.body.id}`).send({ status: 'in-progress' }).expect(200);
+
+      const res = await request(app)
+        .get(`/tasks/${created.body.id}/history?operation=update`)
+        .expect(200);
+
+      assert.ok(res.body.length >= 1);
+      res.body.forEach(h => assert.equal(h.operation, 'update'));
+    });
+
+    it('returns history for deleted tasks', async () => {
+      const created = await request(app)
+        .post('/tasks')
+        .send({ title: 'Deleted queryable' })
+        .expect(201);
+      const taskId = created.body.id;
+
+      await request(app).patch(`/tasks/${taskId}`).send({ status: 'in-progress' }).expect(200);
+      await request(app).delete(`/tasks/${taskId}`).expect(200);
+
+      // Task is gone
+      await request(app).get(`/tasks/${taskId}`).expect(404);
+
+      // But history is still available
+      const res = await request(app)
+        .get(`/tasks/${taskId}/history`)
+        .expect(200);
+
+      assert.ok(res.body.length >= 3);
+      const ops = res.body.map(h => h.operation);
+      assert.ok(ops.includes('create'));
+      assert.ok(ops.includes('update'));
+      assert.ok(ops.includes('delete'));
+    });
+
+    it('each entry includes timestamp, operation, and changes array', async () => {
+      const created = await request(app)
+        .post('/tasks')
+        .send({ title: 'Entry structure' })
+        .expect(201);
+
+      const res = await request(app)
+        .get(`/tasks/${created.body.id}/history`)
+        .expect(200);
+
+      const entry = res.body[0];
+      assert.ok(entry.created_at);
+      assert.ok(entry.operation);
+      assert.ok(Array.isArray(entry.changes));
+      entry.changes.forEach(c => {
+        assert.ok('field' in c);
+        assert.ok('old_value' in c);
+        assert.ok('new_value' in c);
+      });
+    });
+  });
+
   describe('DELETE /tasks/:id', () => {
     it('removes a task and returns it', async () => {
       const created = await request(app)
